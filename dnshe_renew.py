@@ -3,7 +3,7 @@
 """
 DNSHE 免费域名 自动续期脚本
 ================================
-每天检查所有子域名的到期时间; 对进入"免费续期窗口"的域名自动执行续期。
+定期检查所有子域名的到期时间; 对进入"免费续期窗口"的域名自动执行续期。
 
 API 依据官方文档:
   https://my.dnshe.com/knowledgebase/13/DNSHE-Free-Domain-API-User-Guide-V2.0.html
@@ -23,10 +23,12 @@ API 依据官方文档:
   python dnshe_renew.py --auto-renew --days 180
 
   # 注: DNSHE 免费域名在到期前 180 天即可续期(免费窗口),
-  #     默认阈值已设为 180 天, 每天跑会自动在窗口开启后第一时间续上。
+  #     默认阈值已设为 180 天; GitHub Actions 每月 1 号自动运行一次,
+  #     永久有效域名(never_expires=1)会被识别并自动跳过。
 
-环境变量 (或直接改本文件底部配置):
+环境变量 (GitHub Actions 里通过 Secrets 注入):
   DNSHE_API_KEY / DNSHE_API_SECRET
+  可选通知: SERVERCHAN_KEY / PUSHPLUS_TOKEN / TG_BOT_TOKEN / TG_CHAT_ID
 """
 import os
 import sys
@@ -117,6 +119,9 @@ def list_subdomains():
 
 def parse_expiry(item):
     """从记录中解析到期时间, 返回 datetime 或 None"""
+    # 永久有效域名 (never_expires=1) 没有到期时间, 无需续期
+    if item.get("never_expires") in (1, "1", True, "true", "yes"):
+        return "never"
     for field in ("expires_at", "expiry_date", "expires"):
         v = item.get(field)
         if v:
@@ -219,7 +224,7 @@ def main():
 
     # 统计状态: 每个域名独立判断
     # 状态: "窗口外" (>180天, 无需处理) / "待续" (0~180天, 进入可续窗口)
-    #        / "已过期" (剩余<0) / "无到期时间"
+    #        / "已过期" (剩余<0) / "永久有效" (never_expires) / "无到期时间"
     md_lines = [
         f"## DNSHE 域名每日检查 ({datetime.datetime.now():%Y-%m-%d %H:%M:%S})",
         "",
@@ -231,10 +236,15 @@ def main():
 
     # 汇总
     line = []
-    stats = {"窗口外": 0, "待续": 0, "已过期": 0, "无到期时间": 0}
+    stats = {"窗口外": 0, "待续": 0, "已过期": 0, "永久有效": 0, "无到期时间": 0}
     for sub, sid, status, expiry, it in sorted(rows,
-            key=lambda r: r[3] or datetime.datetime.max):
-        if expiry:
+            key=lambda r: (r[3] is not None and r[3] != "never", r[3] if isinstance(r[3], datetime.datetime) else datetime.datetime.max)):
+        if expiry == "never":
+            dl = None
+            dl_s = "∞"
+            state = "永久有效"
+            exp_s = "永久"
+        elif expiry:
             dl = days_left(expiry)
             dl_s = f"{dl}天"
             if dl < 0:
@@ -251,7 +261,8 @@ def main():
             exp_s = "?"
         stats["待续" if state == "待续(窗口内)" else
               "窗口外" if state == "窗口外" else
-              "已过期" if state == "已过期" else "无到期时间"] += 1
+              "已过期" if state == "已过期" else
+              "永久有效" if state == "永久有效" else "无到期时间"] += 1
         print(f"  [{state:>12}] {sub:<40} id={sid}  到期{exp_s} 剩余{dl_s}")
         line.append(f"{sub} 到期剩余 {dl_s} ({status})")
         md_lines.append(f"| {sub} | {state} | {exp_s} | {dl_s if dl is not None else '?'} | {sid} |")
@@ -262,9 +273,10 @@ def main():
         md_lines.append("## 自动续期明细")
         md_lines.append("")
 
-    # 需要处理: 0 ~ N 天内到期 (窗口内)
+    # 需要处理: 0 ~ N 天内到期 (窗口内); 永久有效/无到期时间的排除
     need = [(sub, sid, expiry) for sub, sid, status, expiry, it in rows
-            if expiry and 0 <= days_left(expiry) <= args.days]
+            if isinstance(expiry, datetime.datetime)
+            and 0 <= days_left(expiry) <= args.days]
     print(f"\n未来 {args.days} 天内到期(窗口内)的域名: {len(need)} 个")
     for sub, sid, expiry in need:
         print(f"  - {sub} (id={sid}) 剩余 {days_left(expiry)} 天")
