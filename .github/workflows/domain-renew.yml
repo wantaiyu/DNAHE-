@@ -1,0 +1,58 @@
+name: DNSHE Domain Auto-Renew
+
+# 域名到期前 180 天内即可免费续期, 因此每月检查一次即可:
+#   - 每次全量拉取所有域名, 按各自剩余天数独立判断
+#   - 剩余天数 <= 180 (进入续期窗口) -> 自动续期(0元), 到期日+1年
+#   - 即使某次运行失败, 仍有约 150 天余量可补救
+# 如需更频繁, 可改 cron; 也可随时在 Actions 页面手动 Run workflow 触发一次
+on:
+  schedule:
+    - cron: "0 2 1 * *"      # 每月1号 02:00 UTC (北京时间 10:00)
+  workflow_dispatch:          # 允许手动运行 (随时可触发)
+
+permissions:
+  contents: read
+
+jobs:
+  check-and-renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run domain check & auto-renew
+        id: renew
+        env:
+          # 在仓库 Settings -> Secrets and variables -> Actions 中配置:
+          DNSHE_API_KEY: ${{ secrets.DNSHE_API_KEY }}
+          DNSHE_API_SECRET: ${{ secrets.DNSHE_API_SECRET }}
+          # ---------- 可选通知 (不填则只输出到日志) ----------
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}   # Server酱 SendKey
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}   # PushPlus Token
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}       # Telegram Bot Token
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}           # Telegram Chat ID
+        run: |
+          # 每月全量检查所有域名(按到期时间排序), 窗口内自动续期
+          python dnshe_renew.py --auto-renew --days 180 --summary-file "$GITHUB_STEP_SUMMARY"
+
+      # 运行日志留存, 方便追溯历史
+      - name: Archive run log
+        if: always()
+        run: |
+          mkdir -p logs
+          echo "## $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> logs/renew_history.md
+          echo "run completed — 详细结果见本次 Actions 日志与 Step Summary" >> logs/renew_history.md
+
+      - name: Upload log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renew-log-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
