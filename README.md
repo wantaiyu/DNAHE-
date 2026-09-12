@@ -176,4 +176,3 @@ Secrets 里留空即可，脚本只输出到 Actions 日志。
 
 ---
 
-<p align="center"><sub>脚本版本 v1.1 · 生成于 2026-09-12 · 仅供学习与自用</sub></p>
