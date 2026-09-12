@@ -16,7 +16,7 @@ jobs:
       fail-fast: false        # 一个账号失败不影响其他账号
       matrix:
         # 👇 账号编号列表: 有 3 个账号就写 [1, 2, 3]; 只有一个就写 [1]
-        account: [1, 2, 3]
+        account: [1, 2, 3, 4, 5]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
