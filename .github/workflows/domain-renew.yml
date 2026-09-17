@@ -2,7 +2,7 @@ name: DNSHE Domain Auto-Renew
 
 on:
   schedule:
-    - cron: "0 2 1 * 1"      # 每月1号 02:00 UTC
+    - cron: "0 2 * * 1"      # 每周一 02:00 UTC
   workflow_dispatch:
 
 permissions:
